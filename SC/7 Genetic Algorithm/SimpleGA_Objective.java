@@ -28,12 +28,14 @@ public class SimpleGA_Objective {
 
         // ---- Menus (simple & numbered) ----
         System.out.println("\nSelection Methods:");
-        System.out.println("  1) Roulette   2) Tournament   3) Rank   4) Random");
-        System.out.print("Choose (1-4): ");
+        System.out.println("  1) Roulette   2) Tournament   3) Rank   4) Random   5) Canonical (SUS)");
+        System.out.print("Choose (1-5): ");
         int selChoice = sc.nextInt();
-        String SELECTION = (selChoice==2) ? "tournament" :
-                           (selChoice==3) ? "rank" :
-                           (selChoice==4) ? "random" : "roulette";
+        String SELECTION =
+            (selChoice==2) ? "tournament" :
+            (selChoice==3) ? "rank" :
+            (selChoice==4) ? "random" :
+            (selChoice==5) ? "canonical" : "roulette";
 
         System.out.println("\nCrossover Methods:");
         System.out.println("  1) Single-point   2) Arithmetic   3) Uniform   4) Two-point");
@@ -86,6 +88,13 @@ public class SimpleGA_Objective {
                 System.out.printf("  #%d  f=%.6f  x=%.6f  chrom=%s%n", idx, fit[idx], x, bitsToString(pop[idx]));
             }
 
+            // Prepare Canonical (SUS) parent list for this generation (low-variance proportional)
+            int[] susParents = null;
+            int susPtr = 0;
+            if ("canonical".equals(SELECTION)) {
+                susParents = stochasticUniversalSampling(fit, sum, POP_SIZE);
+            }
+
             // Elitism
             int np = 0;
             for (int e = 0; e < ELITISM && np < POP_SIZE; e++, np++)
@@ -93,8 +102,15 @@ public class SimpleGA_Objective {
 
             // Offspring
             while (np < POP_SIZE) {
-                int p1 = selectParent(fit, sum, SELECTION);
-                int p2 = selectParent(fit, sum, SELECTION);
+                int p1, p2;
+                if ("canonical".equals(SELECTION)) {
+                    // draw parents from SUS list (cycle if needed)
+                    p1 = susParents[susPtr % POP_SIZE]; susPtr++;
+                    p2 = susParents[susPtr % POP_SIZE]; susPtr++;
+                } else {
+                    p1 = selectParent(fit, sum, SELECTION);
+                    p2 = selectParent(fit, sum, SELECTION);
+                }
 
                 int[] c1 = new int[GENE_LEN];
                 int[] c2 = new int[GENE_LEN];
@@ -134,6 +150,7 @@ public class SimpleGA_Objective {
         System.out.println("Best Chromosome: " + bitsToString(pop[bestIdx]));
 
         System.out.println("\n=== Final Population (index | f(x) | x | chromosome) ===");
+        // (Optional: comment this loop if too verbose)
         for (int i = 0; i < POP_SIZE; i++) {
             double x = bitsToDouble(pop[i]);
             double f = objective(x);
@@ -155,7 +172,7 @@ public class SimpleGA_Objective {
             case "tournament": return tournamentSelect(fit, TOURNAMENT_SIZE);
             case "rank":       return rankSelect(fit);
             case "random":     return RNG.nextInt(fit.length);
-            default:           return rouletteSelect(fit, sum);
+            default:           return rouletteSelect(fit, sum); // includes "roulette"
         }
     }
 
@@ -186,6 +203,30 @@ public class SimpleGA_Objective {
             if (acc >= r) return ord[i];
         }
         return ord[n - 1];
+    }
+
+    // ===== Canonical Selection (Stochastic Universal Sampling) =====
+    // Returns 'n' selected parent indices in proportion to fitness, low-variance.
+    static int[] stochasticUniversalSampling(double[] fit, double sum, int n) {
+        int[] selected = new int[n];
+        if (sum <= 0) { // fallback: random parents
+            for (int i = 0; i < n; i++) selected[i] = RNG.nextInt(fit.length);
+            return selected;
+        }
+        // cumulative fitness
+        double[] cum = new double[fit.length];
+        double acc = 0.0;
+        for (int i = 0; i < fit.length; i++) { acc += fit[i]; cum[i] = acc; }
+
+        double step = sum / n;
+        double start = RNG.nextDouble() * step; // single random start in [0, step)
+        int j = 0;
+        for (int i = 0; i < n; i++) {
+            double pointer = start + i * step;
+            while (j < cum.length - 1 && cum[j] < pointer) j++;
+            selected[i] = j;
+        }
+        return selected;
     }
 
     // ===== Crossover =====
@@ -291,8 +332,7 @@ public class SimpleGA_Objective {
         for (int i = 0; i < chrom.length; i++) { val = (val << 1) | (chrom[i] & 1); }
         long max = (chrom.length >= 63) ? Long.MAX_VALUE : ((1L << chrom.length) - 1L);
         if (max == 0) return 0.0;
-        // Normalize to [0,1]
-        double x = (double) val / (double) max;
+        double x = (double) val / (double) max; // Normalize to [0,1]
         if (x < 0) x = 0;
         if (x > 1) x = 1;
         return x;
